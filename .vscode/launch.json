@@ -1,0 +1,35 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+   
+    {
+      "name": "bd2_sorter: ~/temp/samples/",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/bd2_sorter.py",
+      "args": [
+        "~/temp/samples/"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "bd2_sorter: prompt for input dir",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/bd2_sorter.py",
+      "args": [
+        "${input:bd2SorterInputDir}"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ],
+  "inputs": [
+    {
+      "id": "bd2SorterInputDir",
+      "type": "promptString",
+      "description": "Directory containing .wav files"
+    }
+  ]
+}

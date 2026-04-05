@@ -1,0 +1,25 @@
+private/
+
+# Python bytecode and caches
+__pycache__/
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Runtime outputs created by bd2_sorter (when input dir is repo root)
+raw/
+csv/
+matched/
+junk/

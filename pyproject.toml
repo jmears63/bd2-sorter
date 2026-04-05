@@ -1,0 +1,19 @@
+[project]
+name = "bd2-sorter"
+version = "0.1.0"
+description = "Command line tool to run BatDetect2 on WAV recordings."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "batdetect2",
+]
+
+[project.scripts]
+bd2_sorter = "bd2_sorter.cli:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["bd2_sorter*"]
