@@ -4,7 +4,7 @@
 and writes:
 
 - raw JSON output per recording in `raw`
-- a row per file in `csv/raw_combined.csv`, listing probabilites by species
+- raw annotation rows in `csv/raw_combined.csv`
 - sets of symlinks under the "matched" subdirectory for detections
 
 ## Usage
@@ -46,3 +46,7 @@ For each processed wav file and each matched class key, symlinks are created in:
 
 - `matched/all/`
 - each relevant `matched/<class_key>/`
+
+`raw_combined.csv` columns are:
+
+- `filename,time_exp,duration,class_name,start_time,end_time,low_freq,high_freq,class,class_prob,det_prob,individual,event`

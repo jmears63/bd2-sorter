@@ -12,7 +12,7 @@ from typing import Any
 import batdetect2.api as bd2_api
 
 COMBINED_CSV_COLUMNS = [
-    "id",
+    "filename",
     "time_exp",
     "duration",
     "class_name",
@@ -85,19 +85,21 @@ def write_raw_json(output_path: Path, prediction_dict: dict[str, Any]) -> None:
         json.dump(prediction_dict, handle, indent=2)
 
 
-def ensure_raw_combined_csv_header(raw_combined_csv_path: Path) -> None:
-    """Create raw combined CSV file with header if needed."""
-    if raw_combined_csv_path.exists() and raw_combined_csv_path.stat().st_size > 0:
-        return
+def initialize_raw_combined_csv(raw_combined_csv_path: Path) -> None:
+    """Initialize raw combined CSV file with a fresh header."""
     with raw_combined_csv_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=COMBINED_CSV_COLUMNS)
         writer.writeheader()
 
 
-def build_annotation_rows(prediction_dict: dict[str, Any]) -> list[dict[str, Any]]:
-    """Build one CSV row for each annotation entry."""
+def build_annotation_rows(
+    prediction_dict: dict[str, Any],
+    filename: str,
+    threshold: float,
+) -> list[dict[str, Any]]:
+    """Build one CSV row per annotation with class_prob >= threshold."""
     base_fields = {
-        "id": prediction_dict.get("id"),
+        "filename": filename,
         "time_exp": prediction_dict.get("time_exp"),
         "duration": prediction_dict.get("duration"),
         "class_name": prediction_dict.get("class_name"),
@@ -106,6 +108,9 @@ def build_annotation_rows(prediction_dict: dict[str, Any]) -> list[dict[str, Any
     for annotation in prediction_dict.get("annotation", []):
         if not isinstance(annotation, dict):
             continue
+        class_prob = parse_probability(annotation.get("class_prob"))
+        if class_prob is None or class_prob < threshold:
+            continue
         row = {
             **base_fields,
             "start_time": annotation.get("start_time"),
@@ -113,7 +118,7 @@ def build_annotation_rows(prediction_dict: dict[str, Any]) -> list[dict[str, Any
             "low_freq": annotation.get("low_freq"),
             "high_freq": annotation.get("high_freq"),
             "class": annotation.get("class"),
-            "class_prob": annotation.get("class_prob"),
+            "class_prob": class_prob,
             "det_prob": annotation.get("det_prob"),
             "individual": annotation.get("individual"),
             "event": annotation.get("event"),
@@ -315,7 +320,7 @@ def run(
     csv_dir.mkdir(parents=True, exist_ok=True)
     raw_combined_csv_path = csv_dir / "raw_combined.csv"
     summary_csv_path = csv_dir / "summary.csv"
-    ensure_raw_combined_csv_header(raw_combined_csv_path)
+    initialize_raw_combined_csv(raw_combined_csv_path)
     (input_dir / "matched").mkdir(parents=True, exist_ok=True)
 
     wav_files = find_wav_files(input_dir)
@@ -377,7 +382,11 @@ def run(
                 print(json.dumps(sorted_thresholded_class_prob_map))
             print_processing_row(wav_file, symlink_subdirs, moved_to_junk=moved_to_junk)
             write_raw_json(output_path_resolved, prediction_dict)
-            rows = build_annotation_rows(prediction_dict)
+            rows = build_annotation_rows(
+                prediction_dict,
+                filename=wav_file.name,
+                threshold=threshold,
+            )
             append_rows_to_raw_combined_csv(raw_combined_csv_path, rows)
         except Exception as err:  # noqa: BLE001
             failures += 1
