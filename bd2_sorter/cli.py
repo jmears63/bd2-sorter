@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -164,6 +166,115 @@ def write_summary_csv(
             writer.writerow(row)
 
 
+def extract_file_timestamp(filename: str) -> str | None:
+    """Extract YYYYMMDD_HHMMSS timestamp from filename."""
+    stem = Path(filename).stem
+    match = re.search(r"(\d{8}_\d{6})", stem)
+    if not match:
+        return None
+    timestamp_str = match.group(1)
+    try:
+        datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
+    except ValueError:
+        return None
+    return timestamp_str
+
+
+def build_file_class_chirp_counts(
+    prediction_dict: dict[str, Any],
+    threshold: float,
+) -> dict[str, int]:
+    """Return class_key -> chirp_count for a file."""
+    chirp_counts: dict[str, int] = {}
+
+    for annotation in prediction_dict.get("annotation", []):
+        if not isinstance(annotation, dict):
+            continue
+        class_name = annotation.get("class")
+        if not isinstance(class_name, str) or not class_name.strip():
+            continue
+        class_prob = parse_probability(annotation.get("class_prob"))
+        if class_prob is None or class_prob < threshold:
+            continue
+
+        class_key = to_short_class_key(class_name)
+        if not class_key:
+            continue
+
+        chirp_counts[class_key] = chirp_counts.get(class_key, 0) + 1
+    return chirp_counts
+
+
+def compute_bucket_bounds(file_time: str, bucket_minutes: int = 15) -> tuple[str, str]:
+    """Compute bucket start/end strings for a YYYYMMDD_HHMMSS timestamp."""
+    parsed = datetime.strptime(file_time, "%Y%m%d_%H%M%S")
+    minute_bucket = (parsed.minute // bucket_minutes) * bucket_minutes
+    bucket_start = parsed.replace(minute=minute_bucket, second=0, microsecond=0)
+    bucket_end = bucket_start + timedelta(minutes=bucket_minutes)
+    return (
+        bucket_start.strftime("%Y-%m-%d %H:%M:%S"),
+        bucket_end.strftime("%Y-%m-%d %H:%M:%S"),
+    )
+
+
+def write_time_profile_csv(
+    time_profile_csv_path: Path,
+    per_file_time_profile: list[tuple[str, str, int]],
+) -> None:
+    """Write time-profile rows, one row per 15-minute time bucket."""
+    class_columns = sorted({class_key for _, class_key, _ in per_file_time_profile})
+    bucket_counts: dict[datetime, dict[str, int]] = {}
+    for file_time, class_key, chirp_count in per_file_time_profile:
+        bucket_start, bucket_end = compute_bucket_bounds(file_time)
+        del bucket_end  # bucket_end is derived from bucket_start during write-out
+        bucket_start_dt = datetime.strptime(bucket_start, "%Y-%m-%d %H:%M:%S")
+        if bucket_start_dt not in bucket_counts:
+            bucket_counts[bucket_start_dt] = {}
+        bucket_counts[bucket_start_dt][class_key] = (
+            bucket_counts[bucket_start_dt].get(class_key, 0) + chirp_count
+        )
+
+    class_fieldnames: list[str] = []
+    for class_key in class_columns:
+        class_fieldnames.append(class_key)
+        class_fieldnames.append(f"{class_key}_ma_1h")
+    fieldnames = ["bucket_start", "bucket_end", *class_fieldnames]
+
+    if bucket_counts:
+        min_bucket = min(bucket_counts.keys())
+        max_bucket = max(bucket_counts.keys())
+        ordered_buckets: list[datetime] = []
+        cursor = min_bucket
+        while cursor <= max_bucket:
+            ordered_buckets.append(cursor)
+            cursor += timedelta(minutes=15)
+    else:
+        ordered_buckets = []
+
+    moving_avg_window_size = 4  # 4x15min = 1 hour trailing window
+    with time_profile_csv_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for index, bucket_start in enumerate(ordered_buckets):
+            bucket_end = bucket_start + timedelta(minutes=15)
+            class_count_map = bucket_counts.get(bucket_start, {})
+            row: dict[str, Any] = {
+                "bucket_start": bucket_start.strftime("%Y-%m-%d %H:%M:%S"),
+                "bucket_end": bucket_end.strftime("%Y-%m-%d %H:%M:%S"),
+            }
+            for class_key in class_columns:
+                row[class_key] = class_count_map.get(class_key, 0)
+                window_start = max(0, index - moving_avg_window_size + 1)
+                window = ordered_buckets[window_start : index + 1]
+                window_sum = sum(
+                    bucket_counts.get(bucket_dt, {}).get(class_key, 0) for bucket_dt in window
+                )
+                row[f"{class_key}_ma_1h"] = round(window_sum / len(window), 6)
+            writer.writerow(
+                row
+            )
+
+
 def print_class_detection_summary(per_file_class_probs: list[tuple[str, dict[str, float]]]) -> None:
     """Print class-level detection summary rows to stdout."""
     class_counts: dict[str, int] = {}
@@ -320,6 +431,7 @@ def run(
     csv_dir.mkdir(parents=True, exist_ok=True)
     raw_combined_csv_path = csv_dir / "raw_combined.csv"
     summary_csv_path = csv_dir / "summary.csv"
+    time_profile_csv_path = csv_dir / "time_profile.csv"
     initialize_raw_combined_csv(raw_combined_csv_path)
     (input_dir / "matched").mkdir(parents=True, exist_ok=True)
 
@@ -337,6 +449,7 @@ def run(
 
     failures = 0
     per_file_class_probs: list[tuple[str, dict[str, float]]] = []
+    per_file_time_profile: list[tuple[str, str, int]] = []
     for wav_file in wav_files:
         output_path = raw_dir / f"{wav_file.name}.json"
         output_path_resolved = output_path.resolve()
@@ -355,6 +468,25 @@ def run(
                 threshold=threshold,
             )
             per_file_class_probs.append((wav_file.name, thresholded_class_prob_map))
+            file_timestamp = extract_file_timestamp(wav_file.name)
+            if file_timestamp is None:
+                print(
+                    f"Failed {wav_file.name}: unable to extract YYYYMMDD_HHMMSS timestamp",
+                    file=sys.stderr,
+                )
+            else:
+                file_class_chirp_counts = build_file_class_chirp_counts(
+                    prediction_dict,
+                    threshold=threshold,
+                )
+                for class_key, chirp_count in file_class_chirp_counts.items():
+                    per_file_time_profile.append(
+                        (
+                            file_timestamp,
+                            class_key,
+                            chirp_count,
+                        )
+                    )
             sorted_class_probs = sorted(
                 thresholded_class_prob_map.items(),
                 key=lambda item: (-item[1], item[0]),
@@ -394,10 +526,12 @@ def run(
 
     if failures:
         write_summary_csv(summary_csv_path, per_file_class_probs)
+        write_time_profile_csv(time_profile_csv_path, per_file_time_profile)
         print_class_detection_summary(per_file_class_probs)
         print(f"Completed with {failures} failure(s).", file=sys.stderr)
         return 1
     write_summary_csv(summary_csv_path, per_file_class_probs)
+    write_time_profile_csv(time_profile_csv_path, per_file_time_profile)
     print_class_detection_summary(per_file_class_probs)
     return 0
 

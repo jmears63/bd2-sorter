@@ -4,8 +4,10 @@
 and writes:
 
 - raw JSON output per recording in `raw`
-- raw annotation rows in `csv/raw_combined.csv`
-- sets of symlinks under the "matched" subdirectory for detections
+- threshold-filtered annotation rows in `csv/raw_combined.csv`
+- per-file class summary in `csv/summary.csv`
+- bucketed time profile in `csv/time_profile.csv`
+- matched symlinks under `matched`
 
 ## Usage
 
@@ -34,8 +36,10 @@ For an input directory `INPUT_DIR`, the tool creates:
 - `INPUT_DIR/raw/` with files named `<original.wav>.json`
 - `INPUT_DIR/csv/raw_combined.csv`
 - `INPUT_DIR/csv/summary.csv`
+- `INPUT_DIR/csv/time_profile.csv`
 - `INPUT_DIR/matched/all/`
 - `INPUT_DIR/matched/<class_key>/` for each class key that meets threshold
+- optionally `INPUT_DIR/junk/` when `-j` is enabled and a file has no matched classes
 
 Class keys are generated from class names by taking the first 3 letters of each
 word, lowercasing, and removing spaces. Example:
