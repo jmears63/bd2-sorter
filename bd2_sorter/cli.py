@@ -380,7 +380,7 @@ def create_class_symlinks(
     for class_key, class_prob in sorted_class_probs:
         class_dir = matched_dir / class_key
         class_score = format_prob_score(class_prob)
-        class_symlink_name = f"ln_{class_score}_{wav_file.name}"
+        class_symlink_name = f"ln_{wav_file.stem}_{class_score}{wav_file.suffix}"
         create_symlink_in_dir(class_dir, class_symlink_name, source_wav)
 
 
