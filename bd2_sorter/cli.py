@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import re
 import sys
 from datetime import datetime, timedelta
@@ -70,6 +71,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--junk",
         action="store_true",
         help="Move files with no over-threshold detections into junk directory.",
+    )
+    parser.add_argument(
+        "-r",
+        "--replace-symlinks",
+        action="store_true",
+        help="Replace existing symlinks when creating matched links.",
     )
     return parser.parse_args(argv)
 
@@ -344,10 +351,20 @@ def ensure_matched_class_dirs(base_dir: Path, class_keys: list[str]) -> None:
         (matched_dir / class_key).mkdir(parents=True, exist_ok=True)
 
 
-def create_symlink_in_dir(target_dir: Path, symlink_name: str, source_wav: Path) -> None:
+def create_symlink_in_dir(
+    target_dir: Path,
+    symlink_name: str,
+    source_wav: Path,
+    replace_symlinks: bool = False,
+) -> None:
     """Create a symlink in target_dir, skipping conflicting existing paths."""
     symlink_path = target_dir / symlink_name
+    relative_target = Path(os.path.relpath(source_wav, start=target_dir.resolve()))
     if symlink_path.exists() or symlink_path.is_symlink():
+        if symlink_path.is_symlink() and replace_symlinks:
+            symlink_path.unlink()
+            symlink_path.symlink_to(relative_target)
+            return
         if symlink_path.is_symlink() and symlink_path.resolve() == source_wav:
             return
         print(
@@ -355,7 +372,7 @@ def create_symlink_in_dir(target_dir: Path, symlink_name: str, source_wav: Path)
             file=sys.stderr,
         )
         return
-    symlink_path.symlink_to(source_wav)
+    symlink_path.symlink_to(relative_target)
 
 
 def format_prob_score(probability: float) -> str:
@@ -370,18 +387,29 @@ def create_class_symlinks(
     base_dir: Path,
     wav_file: Path,
     sorted_class_probs: list[tuple[str, float]],
+    replace_symlinks: bool = False,
 ) -> None:
     """Create per-class and all symlinks to original wav file."""
     source_wav = wav_file.resolve()
     matched_dir = base_dir / "matched"
     top_class, _ = sorted_class_probs[0]
     all_symlink_name = f"ln_{top_class}_{wav_file.name}"
-    create_symlink_in_dir(matched_dir / "all", all_symlink_name, source_wav)
+    create_symlink_in_dir(
+        matched_dir / "all",
+        all_symlink_name,
+        source_wav,
+        replace_symlinks=replace_symlinks,
+    )
     for class_key, class_prob in sorted_class_probs:
         class_dir = matched_dir / class_key
         class_score = format_prob_score(class_prob)
         class_symlink_name = f"ln_{wav_file.stem}_{class_score}{wav_file.suffix}"
-        create_symlink_in_dir(class_dir, class_symlink_name, source_wav)
+        create_symlink_in_dir(
+            class_dir,
+            class_symlink_name,
+            source_wav,
+            replace_symlinks=replace_symlinks,
+        )
 
 
 def print_processing_row(wav_file: Path, subdir_names: list[str], moved_to_junk: bool = False) -> None:
@@ -417,6 +445,7 @@ def run(
     verbose: bool = False,
     threshold: float = 0.5,
     junk: bool = False,
+    replace_symlinks: bool = False,
 ) -> int:
     """Execute bat detection pipeline for all .wav files in input_dir."""
     input_dir = input_dir.expanduser()
@@ -499,6 +528,7 @@ def run(
                     input_dir,
                     wav_file,
                     sorted_class_probs,
+                    replace_symlinks=replace_symlinks,
                 )
                 symlink_subdirs = ["all", *sorted_class_keys]
             elif junk:
@@ -545,5 +575,6 @@ def main(argv: list[str] | None = None) -> None:
             verbose=args.verbose,
             threshold=args.threshold,
             junk=args.junk,
+            replace_symlinks=args.replace_symlinks,
         )
     )

@@ -20,6 +20,7 @@ Options:
 - `-v`, `--verbose`: print active BatDetect2 config and per-file matched class map
 - `-t`, `--threshold <float>`: probability threshold for class matching (default `0.5`)
 - `-j`, `--junk`: move files with no over-threshold detections into `junk/`
+- `-r`, `--replace-symlinks`: replace existing symlinks when writing matched links
 
 Examples:
 
@@ -27,6 +28,7 @@ Examples:
 bd2_sorter -v /path/to/wav_directory
 bd2_sorter -t 0.7 /path/to/wav_directory
 bd2_sorter -j -t 0.6 /path/to/wav_directory
+bd2_sorter -r /path/to/wav_directory
 ```
 
 ## Output layout
